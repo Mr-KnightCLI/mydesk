@@ -12,7 +12,7 @@ import {
   ArrowUpRight,
   PanelLeft,
   LogOut,
-  Sun,
+  Sparkles,
   CalendarDays,
   Paperclip,
   ChevronRight,
@@ -21,7 +21,7 @@ import {
   Menu,
   X,
 } from "lucide-react";
-import { empty, type PdfRef, type Space } from "../lib/tasks";
+import { empty, type PdfRef, type Space, type Thread } from "../lib/tasks";
 const views = [
   ["Chat", MessageSquare],
   ["Tasks", SquareCheck],
@@ -71,6 +71,9 @@ export default function Desk() {
     if(!window.speechSynthesis){F("Spoken replies are unavailable in this browser.");return}
     readAloud.current=!spoken;setSpoken(!spoken);window.speechSynthesis.cancel();
   }
+  const [pending,setPending]=useState<string|null>(null);
+  const sending=useRef(false);
+  const chatInput=useRef<HTMLTextAreaElement>(null);
   const [pdf,setPdf]=useState<PdfRef|null>(null);
   const [uploading,setUploading]=useState(false);
   const fileInput=useRef<HTMLInputElement>(null);
@@ -132,7 +135,7 @@ export default function Desk() {
   }, []);
   useEffect(() => {
     end.current?.scrollIntoView({ block: "nearest" });
-  }, [chat?.messages.length]);
+  }, [thread, chat?.messages.length, pending]);
   function nav(v: string) {
     V(v);
     M(false);
@@ -148,19 +151,38 @@ export default function Desk() {
     D("");
   }
   async function send(text: string, source = note) {
-    if (!text.trim() || busy) return;
-    await run(async () => {
-      const data = await call("chat", { thread, text, note: source, pdf: source?null:pdf?.id||null });
-      const activeId=thread || data.space.threads[0].id;
-      T(activeId);
-      const reply=(data.space as Space).threads.find(c=>c.id===activeId)?.messages.at(-1);
-      if(readAloud.current && reply?.role==="assistant" && window.speechSynthesis){
-        window.speechSynthesis.cancel();
-        window.speechSynthesis.speak(new SpeechSynthesisUtterance(reply.text));
-      }
-      V("Chat");
-      D("");
-    });
+    const message=text.trim();
+    if (!message || busy || sending.current) return;
+    sending.current=true;
+    V("Chat");
+    setPending(message);
+    if(text===draft)D("");
+    try {
+      await run(async () => {
+        try {
+          const data=await call("chat",{thread,text:message,note:source,pdf:source?null:pdf?.id||null,compact:true});
+          const updated: Thread = data.thread ?? data.space.threads.find((item:Thread)=>item.id===thread) ?? data.space.threads[0];
+          if(data.thread) S(current=>({
+            ...current,tasks:data.tasks,memories:data.memories,
+            threads:current.threads.some(item=>item.id===updated.id)
+              ?current.threads.map(item=>item.id===updated.id?updated:item)
+              :[updated,...current.threads],
+          }));
+          T(updated.id);
+          const reply=updated.messages.at(-1);
+          if(readAloud.current && reply?.role==="assistant" && window.speechSynthesis){
+            window.speechSynthesis.cancel();
+            window.speechSynthesis.speak(new SpeechSynthesisUtterance(reply.text));
+          }
+        } catch(error) {
+          D(current=>current || message);
+          throw error;
+        }
+      });
+    } finally {
+      sending.current=false;
+      setPending(null);
+    }
   }
   function openNote(id: string) {
     nav("Notes");
@@ -178,6 +200,8 @@ export default function Desk() {
       <input hidden ref={fileInput} type="file" accept=".pdf,application/pdf" aria-label="Choose PDF file" onChange={e=>{void attach(e.target.files?.[0]);e.target.value=""}}/>
       {pdf && <div className="fileChip"><FileText size={17}/><span>{pdf.title}</span><small>{pdf.count} pages</small><button type="button" aria-label="Detach PDF" onClick={()=>setPdf(null)}><X size={14}/></button></div>}
       <textarea
+        ref={chatInput}
+        maxLength={8000}
         aria-label="Message MyDesk"
         placeholder={
           pdf ? "Ask about "+pdf.title+"…" : selected
@@ -236,7 +260,7 @@ export default function Desk() {
             <X />
           </button>
         </div>
-        <button className="new" onClick={fresh}>
+        <button className="new" disabled={!!pending} onClick={fresh}>
           <Plus size={17} /> New conversation
         </button>
         <small>Workspace</small>
@@ -244,6 +268,7 @@ export default function Desk() {
           {views.map(([name, Icon]) => (
             <button
               key={name}
+              disabled={!!pending}
               className={view === name ? "active" : ""}
               onClick={() => nav(name)}
             >
@@ -257,6 +282,7 @@ export default function Desk() {
           {space.threads.length ? (
             space.threads.map((c) => (
               <button
+                disabled={!!pending}
                 key={c.id}
                 aria-current={thread===c.id && view==="Chat"?"page":undefined}
                 onClick={() => {
@@ -384,12 +410,12 @@ export default function Desk() {
         ) : view === "Chat" ? (
           <section className="chat">
             <div className="stream">
-              {!chat ? (
+              {!chat && !pending ? (
                 <div className="welcome">
                   <div className="sun">
-                    <Sun size={42} strokeWidth={1.3} />
+                    <Sparkles size={29} strokeWidth={1.65} />
                   </div>
-                  <h1>What’s on your desk?</h1>
+                  <h1>What can I help with?</h1>
                   <p>
                     Ask a question, explore a PDF, or make a plan for today.
                   </p>
@@ -398,8 +424,9 @@ export default function Desk() {
                       [CalendarDays, "Plan my day", "What should I do today?"],
                       [BookOpen, "Study a note", ""],
                       [FileText, "Ask a PDF", ""],
+                      [MessageSquare, "Start writing", "Help me write "],
                     ].map(([I, label, prompt]) => {
-                      const Icon = I as typeof Sun;
+                      const Icon = I as typeof Sparkles;
                       return (
                         <button
                           key={String(label)}
@@ -408,7 +435,7 @@ export default function Desk() {
                               ? nav("Notes")
                               : label === "Plan my day"
                                 ? void send(String(prompt), "")
-                                : D(String(prompt))
+                                : (D(String(prompt)), chatInput.current?.focus())
                           }
                         >
                           <Icon size={18} />
@@ -421,8 +448,8 @@ export default function Desk() {
                 </div>
               ) : (
                 <div className="messages">
-                  <h2>{chat.title}</h2>
-                  {chat.messages.map((m, i) => (
+                  <h2>{chat?.title ?? pending}</h2>
+                  {chat?.messages.map((m, i) => (
                     <article key={i} className={m.role}>
                       <strong>{m.role === "user" ? "You" : "MyDesk"}</strong>
                       <p>{m.text}</p>
@@ -436,6 +463,10 @@ export default function Desk() {
                       )}
                     </article>
                   ))}
+                  {pending && <>
+                    <article className="user"><strong>You</strong><p>{pending}</p></article>
+                    <div className="replyPending" role="status"><span className="replyDots" aria-hidden="true"><i/><i/><i/></span>MyDesk is working</div>
+                  </>}
                   <div ref={end} />
                 </div>
               )}

@@ -32,6 +32,7 @@ export async function POST(req: NextRequest) {
       s: Space,
       sample = false,
       newToken = "";
+    let updatedThread: Thread | undefined;
     const token = digest(req.cookies.get("desk")?.value || "");
     if (["signup", "signin", "sample"].includes(op)) {
       sample = op === "sample";
@@ -113,6 +114,7 @@ export async function POST(req: NextRequest) {
           };
           s.threads.unshift(c);
         }
+        updatedThread=c;
         const pdfId=b.pdf===undefined?c.pdf?.id:b.pdf;
         if(pdfId && !b.note){
           const reply=await answerPdf(client,owner,pdfId,c,input,sample);
@@ -160,7 +162,9 @@ export async function POST(req: NextRequest) {
     const res = NextResponse.json(
       op === "signout"
         ? {}
-        : { space: s, email: sample ? "Sample workspace" : email, sample },
+        : updatedThread && b.compact === true
+          ? { thread: updatedThread, tasks: s.tasks, memories: s.memories }
+          : { space: s, email: sample ? "Sample workspace" : email, sample },
     );
     if (newToken || op === "signout")
       res.cookies.set("desk", newToken, {
