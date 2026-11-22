@@ -1,5 +1,7 @@
 # MyDesk
 
+[Open the live MyDesk app](https://mydesk-gules.vercel.app/)
+
 A laptop-friendly personal study desk built with Next.js App Router, TypeScript, PostgreSQL and optional server-side NVIDIA. Open the app and sign in or create an account to chat with your personal assistant. Choose Try offline sample only when you want the key-free workspace.
 
 ## Local setup
